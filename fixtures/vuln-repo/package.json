@@ -1,0 +1,12 @@
+{
+  "name": "vuln-repo",
+  "version": "1.0.0",
+  "description": "Deliberately vulnerable fixture for AutoAudit testing. Do not deploy.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "4.17.1",
+    "lodash": "4.17.15",
+    "minimist": "1.2.0"
+  }
+}

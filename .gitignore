@@ -1,0 +1,8 @@
+node_modules/
+.next/
+out/
+.env*.local
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+fixtures/vuln-repo/node_modules/
