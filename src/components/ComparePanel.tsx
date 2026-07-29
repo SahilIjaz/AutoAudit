@@ -7,39 +7,60 @@ import { MetricsPanel } from "./MetricsPanel";
 function Column({
   title,
   subtitle,
+  accent,
   findings,
-  repo,
 }: {
   title: string;
   subtitle: string;
+  accent: "grounded" | "naive";
   findings: VerifiedFinding[];
   repo?: RepoMeta;
 }) {
   return (
     <div className="flex-1">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <p className="mb-3 text-sm text-neutral-500">{subtitle}</p>
-      <div className="space-y-2">
+      <div className="mb-4 flex items-center gap-2.5">
+        <span
+          className={`aa-dot ${accent === "grounded" ? "bg-[var(--accent)]" : "bg-low"}`}
+          style={{ width: 8, height: 8 }}
+        />
+        <div>
+          <h2 className="font-semibold leading-tight">{title}</h2>
+          <p className="text-xs text-[var(--text-faint)]">{subtitle}</p>
+        </div>
+      </div>
+      <div className="space-y-2.5">
         {findings.map((f, i) => (
-          <div
-            key={f.findingId + i}
-            className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-3"
-          >
-            <div className="flex items-center gap-2">
+          <div key={f.findingId + i} className="aa-card p-3.5">
+            <div className="flex flex-wrap items-center gap-2">
               <SeverityBadge severity={f.severity} />
               <VerdictChip verdict={f.verdict} />
             </div>
-            <p className="mt-2 text-sm font-medium text-neutral-100">{f.title}</p>
+            <p className="mt-2 text-sm font-medium text-[var(--text)]">{f.title}</p>
             {f.file && (
-              <p className="mt-1 font-mono text-xs text-neutral-500">
+              <p className="mt-1 font-mono text-xs text-[var(--text-faint)]">
                 {f.file}
                 {f.line ? `:${f.line}` : ""}
               </p>
             )}
-            <p className="mt-1 text-xs text-neutral-400">{f.explanation}</p>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">{f.explanation}</p>
           </div>
         ))}
-        {findings.length === 0 && <p className="text-sm text-neutral-500">No findings.</p>}
+        {findings.length === 0 && (
+          <p className="aa-panel p-4 text-sm text-[var(--text-faint)]">No findings.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Highlight({ value, label, tone }: { value: number; label: string; tone: string }) {
+  return (
+    <div className="aa-card px-4 py-3 text-center">
+      <div className="text-2xl font-bold" style={{ color: tone }}>
+        {value}
+      </div>
+      <div className="mt-0.5 text-[0.68rem] uppercase tracking-wider text-[var(--text-faint)]">
+        {label}
       </div>
     </div>
   );
@@ -51,23 +72,29 @@ export function ComparePanel({ result }: { result: CompareResult }) {
   const falsePos = grounded.filter((f) => f.verdict === "false_positive").length;
 
   return (
-    <div className="space-y-8">
-      <div className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-5 text-sm text-neutral-300">
-        <p>
-          The grounded agent verified <strong>{grounded.length}</strong> tool-reported
-          findings — confirming <strong>{confirmed}</strong> and marking{" "}
-          <strong>{falsePos}</strong> as false positives. The naive prompt reported{" "}
-          <strong>{result.naive.findings.length}</strong> findings with no tools and no
-          verification. Compare which are grounded in real evidence.
+    <div className="space-y-10">
+      <div className="aa-panel p-5">
+        <div className="grid grid-cols-3 gap-3">
+          <Highlight value={confirmed} label="Confirmed" tone="var(--high)" />
+          <Highlight value={falsePos} label="False positives" tone="var(--good)" />
+          <Highlight value={result.naive.findings.length} label="Naive (unverified)" tone="var(--low)" />
+        </div>
+        <p className="mt-4 text-sm leading-relaxed text-[var(--text-muted)]">
+          The grounded agent verified <strong className="text-[var(--text)]">{grounded.length}</strong>{" "}
+          tool-reported findings — confirming{" "}
+          <strong className="text-[var(--text)]">{confirmed}</strong> and dismissing{" "}
+          <strong className="text-[var(--text)]">{falsePos}</strong> as false positives. The naive
+          prompt reported <strong className="text-[var(--text)]">{result.naive.findings.length}</strong>{" "}
+          findings with no tools and no verification.
         </p>
       </div>
 
-      <div>
-        <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+      <div className="space-y-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-faint)]">
           Grounded cost
         </h3>
         <MetricsPanel metrics={result.grounded.metrics} />
-        <h3 className="mb-2 mt-4 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+        <h3 className="pt-2 text-xs font-semibold uppercase tracking-wider text-[var(--text-faint)]">
           Naive cost
         </h3>
         <MetricsPanel metrics={result.naive.metrics} />
@@ -77,12 +104,14 @@ export function ComparePanel({ result }: { result: CompareResult }) {
         <Column
           title="Grounded agent"
           subtitle="Tool-found, agent-verified"
+          accent="grounded"
           findings={grounded}
           repo={result.grounded.repo}
         />
         <Column
           title="Naive LLM"
           subtitle="Just-ask-the-model, unverified"
+          accent="naive"
           findings={result.naive.findings}
         />
       </div>

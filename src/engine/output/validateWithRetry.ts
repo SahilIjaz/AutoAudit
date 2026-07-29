@@ -16,7 +16,7 @@ export class ReportValidationError extends Error {
 
 const REPORT_INSTRUCTION = `Now produce the final audit report as a single JSON object and nothing else. It must match this shape exactly:
 {
-  "summary": string,
+  "summary": string,            // ONE or TWO short sentences, 40 words MAX. Plain English a non-expert can understand — no jargon, no file lists, no per-finding recap. Say (1) the overall verdict in one phrase and (2) the single most important thing to do. Get to the point.
   "findings": [
     {
       "findingId": string,        // MUST be one of the finding ids you were given

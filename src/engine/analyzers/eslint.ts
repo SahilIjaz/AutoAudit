@@ -9,6 +9,10 @@ import securityPlugin from "eslint-plugin-security";
 
 const SECURITY_RULES = new Set(["no-eval", "no-implied-eval", "no-new-func"]);
 
+// ESLint only understands JavaScript/TypeScript — skip it entirely for repos
+// that contain no JS/TS source (Python, Go, etc.). Semgrep covers those.
+const JS_TS_EXTS = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
+
 function categoryFor(ruleId: string | null): Category {
   if (!ruleId) return "code-quality";
   if (ruleId.startsWith("security/") || SECURITY_RULES.has(ruleId)) return "security";
@@ -78,7 +82,7 @@ export async function runEslintSecurity(
 
 export const eslintAnalyzer: Analyzer = {
   name: "eslint",
-  isApplicable: () => true,
+  isApplicable: (profile) => JS_TS_EXTS.some((ext) => (profile.languages[ext] ?? 0) > 0),
   async run(repoDir, profile) {
     try {
       return await runEslintSecurity(repoDir, profile);

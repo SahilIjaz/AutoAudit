@@ -102,17 +102,11 @@ export async function profileRepo(
   else if (await exists("pnpm-lock.yaml")) packageManager = "pnpm";
   else if (hasPackageJson) packageManager = "npm";
 
-  const jsTsFiles =
-    (walked.languages[".js"] ?? 0) +
-    (walked.languages[".jsx"] ?? 0) +
-    (walked.languages[".ts"] ?? 0) +
-    (walked.languages[".tsx"] ?? 0) +
-    (walked.languages[".mjs"] ?? 0) +
-    (walked.languages[".cjs"] ?? 0);
-  if (jsTsFiles === 0) {
-    throw new UnsupportedRepoError(
-      "AutoAudit v1 supports JavaScript/TypeScript repositories only — no JS/TS files were found."
-    );
+  // AutoAudit analyzes repos of any language: Semgrep's rule packs are
+  // multi-language and the agent reads files regardless of language. The only
+  // thing worth rejecting is a repo with nothing to scan.
+  if (walked.fileCount === 0) {
+    throw new UnsupportedRepoError("No source files found in the repository — nothing to analyze.");
   }
 
   return {

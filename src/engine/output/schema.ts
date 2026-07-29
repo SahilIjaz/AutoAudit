@@ -15,7 +15,9 @@ export const VerifiedFindingSchema = z.object({
 });
 
 export const AuditReportSchema = z.object({
-  summary: z.string(),
+  // Keep the summary tight — a hard cap the retry loop enforces if the model
+  // over-writes. ~40 words ≈ 280 chars; 320 leaves a little headroom.
+  summary: z.string().max(320, "summary must be concise (≤ 320 characters, ~40 words)"),
   findings: z.array(VerifiedFindingSchema),
 });
 

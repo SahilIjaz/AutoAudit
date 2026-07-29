@@ -36,40 +36,49 @@ export function RepoForm() {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <input
-        type="text"
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        placeholder="https://github.com/owner/repo"
-        className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-3 text-neutral-100 outline-none focus:border-blue-500"
-      />
-      <div className="flex items-center gap-4 text-sm">
-        <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            checked={mode === "grounded"}
-            onChange={() => setMode("grounded")}
-          />
-          Grounded audit
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            checked={mode === "compare"}
-            onChange={() => setMode("compare")}
-          />
-          Compare vs. naive LLM
-        </label>
+    <form onSubmit={submit} className="space-y-5">
+      <div className="relative">
+        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-faint)]">
+          ⌥
+        </span>
+        <input
+          type="text"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://github.com/owner/repo"
+          className="aa-input !pl-11 font-mono text-sm"
+          autoComplete="off"
+          spellCheck={false}
+        />
       </div>
-      <button
-        type="submit"
-        disabled={busy || !url}
-        className="rounded-lg bg-blue-600 px-5 py-3 font-medium text-white disabled:opacity-50"
-      >
-        {busy ? "Starting…" : "Analyze"}
-      </button>
-      {error && <p className="text-sm text-red-400">{error}</p>}
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="aa-segment" role="tablist" aria-label="Analysis mode">
+          <button type="button" data-active={mode === "grounded"} onClick={() => setMode("grounded")}>
+            Grounded audit
+          </button>
+          <button type="button" data-active={mode === "compare"} onClick={() => setMode("compare")}>
+            Compare vs. naive
+          </button>
+        </div>
+
+        <button type="submit" disabled={busy || !url} className="aa-btn">
+          {busy ? (
+            <>
+              <span className="aa-spin inline-block h-4 w-4 rounded-full border-2 border-[#0a0c12]/40 border-t-[#0a0c12]" />
+              Starting…
+            </>
+          ) : (
+            <>Analyze →</>
+          )}
+        </button>
+      </div>
+
+      {error && (
+        <p className="aa-chip sev-high w-full justify-start !rounded-lg py-2 text-xs normal-case">
+          {error}
+        </p>
+      )}
     </form>
   );
 }
