@@ -5,7 +5,7 @@ import { CONFIG } from "../config";
 import type { RepoProfile, VerifiedFinding, AnalysisMetrics } from "../types";
 import type { MetricsCollector } from "../metrics/metrics";
 import { NAIVE_REVIEW_SYSTEM } from "../agent/prompts";
-import { AuditReportSchema } from "../output/schema";
+import { AuditReportSchema, normalizeFinding } from "../output/schema";
 
 const IGNORED_DIRS = new Set([".git", "node_modules", "dist", "build", ".next"]);
 const SOURCE_EXT = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".json"]);
@@ -93,7 +93,7 @@ ${source}`;
     try {
       const parsed = AuditReportSchema.parse(JSON.parse(text.slice(start, end + 1)));
       summary = parsed.summary;
-      findings = parsed.findings;
+      findings = parsed.findings.map(normalizeFinding);
     } catch {
       summary = "Naive review produced unparseable output.";
     }

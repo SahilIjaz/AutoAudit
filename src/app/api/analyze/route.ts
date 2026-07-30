@@ -1,43 +1,22 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { getJobStore } from "@/engine/jobs/jobStore";
 import { runAnalysis } from "@/engine/index";
-import { parseGitHubUrl, RepoUrlError } from "@/engine/git/cloneRepo";
+import { parseAnalyzeRequest } from "../_lib/analyzeRequest";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const bodySchema = z.object({ repoUrl: z.string() });
-
 export async function POST(req: Request): Promise<Response> {
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-  const parsed = bodySchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "repoUrl is required" }, { status: 400 });
-  }
-
-  const repoUrl = parsed.data.repoUrl.trim();
-  if (repoUrl.startsWith("http")) {
-    try {
-      parseGitHubUrl(repoUrl);
-    } catch (err) {
-      if (err instanceof RepoUrlError) {
-        return NextResponse.json({ error: err.message }, { status: 400 });
-      }
-      throw err;
-    }
-  }
+  const parsed = await parseAnalyzeRequest(req);
+  if ("error" in parsed) return parsed.error;
+  const { repoUrl, email } = parsed.data;
 
   const store = getJobStore();
-  const job = store.create({ repoUrl, mode: "grounded" });
+  const job = store.create({ repoUrl, mode: "grounded", email });
 
-  // Fire and forget — the polling endpoint reports progress.
-  void runAnalysis(repoUrl, job.id, store).catch((err) => {
+  // Fire and forget — the polling endpoint reports progress, and the emailed
+  // report means the user can close the tab and still get the result.
+  void runAnalysis(repoUrl, job.id, store, { email }).catch((err) => {
     store.update(job.id, { error: String(err) });
     store.appendEvent(job.id, "error", String(err));
   });

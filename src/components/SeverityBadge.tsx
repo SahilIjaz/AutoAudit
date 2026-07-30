@@ -1,15 +1,21 @@
 import type { Severity, Verdict } from "@/engine/types";
 
-export function SeverityBadge({ severity }: { severity: Severity }) {
-  return (
-    <span className={`aa-chip sev-${severity} uppercase`}>
-      <span className={`aa-dot bg-${severity}`} />
-      {severity}
-    </span>
-  );
-}
+/** Everyday wording for the default (simple) view. */
+export const SEVERITY_PLAIN: Record<Severity, string> = {
+  high: "High risk",
+  medium: "Medium risk",
+  low: "Low risk",
+};
 
-const VERDICT_LABEL: Record<Verdict, string> = {
+export const VERDICT_PLAIN: Record<Verdict, string> = {
+  confirmed: "Real problem",
+  false_positive: "Not a problem",
+  needs_review: "Needs a look",
+  unverified: "Not checked",
+};
+
+/** The technical terms — only shown inside the deeper analysis. */
+export const VERDICT_LABEL: Record<Verdict, string> = {
   confirmed: "confirmed",
   false_positive: "false positive",
   needs_review: "needs review",
@@ -23,11 +29,26 @@ const VERDICT_ICON: Record<Verdict, string> = {
   unverified: "○",
 };
 
-export function VerdictChip({ verdict }: { verdict: Verdict }) {
+export function SeverityBadge({
+  severity,
+  plain = false,
+}: {
+  severity: Severity;
+  plain?: boolean;
+}) {
+  return (
+    <span className={`aa-chip sev-${severity}${plain ? "" : " uppercase"}`}>
+      <span className={`aa-dot bg-${severity}`} />
+      {plain ? SEVERITY_PLAIN[severity] : severity}
+    </span>
+  );
+}
+
+export function VerdictChip({ verdict, plain = false }: { verdict: Verdict; plain?: boolean }) {
   return (
     <span className={`aa-chip v-${verdict}`}>
       <span aria-hidden>{VERDICT_ICON[verdict]}</span>
-      {VERDICT_LABEL[verdict]}
+      {plain ? VERDICT_PLAIN[verdict] : VERDICT_LABEL[verdict]}
     </span>
   );
 }

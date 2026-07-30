@@ -21,7 +21,48 @@ export const CONFIG = {
   maxOutputValidationRetries: 3,
   largeFileBytes: 500 * 1024,
   jobTtlMs: 60 * 60 * 1000,
+  /** Findings listed in the email body; the rest live in the attachment only. */
+  maxFindingsInEmail: 15,
+  /** Per-address send cap, so an open form can't be used as a mail relay. */
+  emailRateLimit: { max: 5, windowMs: 60 * 60 * 1000 },
 } as const;
+
+export interface MailConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from: string;
+  /** Public base URL for report links. Omitted when only running locally. */
+  baseUrl: string | null;
+}
+
+/**
+ * SMTP settings from the environment. Returns null when unconfigured — the
+ * email feature then reports itself as unavailable instead of half-working.
+ */
+export function mailConfig(): MailConfig | null {
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  if (!user || !pass) return null;
+
+  const port = Number(process.env.SMTP_PORT ?? 465);
+  return {
+    host: process.env.SMTP_HOST ?? "smtp.gmail.com",
+    port,
+    // 465 is implicit TLS; 587 upgrades via STARTTLS.
+    secure: port === 465,
+    user,
+    pass,
+    from: process.env.MAIL_FROM ?? `AutoAudit <${user}>`,
+    baseUrl: process.env.APP_BASE_URL?.replace(/\/$/, "") ?? null,
+  };
+}
+
+export function isEmailEnabled(): boolean {
+  return mailConfig() !== null;
+}
 
 export interface Toolchain {
   git: string;

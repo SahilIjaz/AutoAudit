@@ -25,7 +25,17 @@ const REPORT_INSTRUCTION = `Now produce the final audit report as a single JSON 
       "category": "security" | "dependency" | "code-quality",
       "file": string | null,
       "line": number | null,
-      "title": string,
+
+      // --- The plain-language layer. This is ALL most readers will see, so it
+      // --- must stand alone and be understandable by someone who does not
+      // --- code. No jargon, no rule ids, no tool names, no file paths here.
+      "plainTitle": string,       // ≤ 10 words, ≤ 72 chars. The problem in everyday words, e.g. "A password is written directly into the code".
+      "plainImpact": string,      // EXACTLY ONE sentence, ≤ 25 words. What could actually go wrong, concretely. No hedging, no restating the title.
+      "plainFix": string | null,  // EXACTLY ONE short instruction, ≤ 20 words, e.g. "Move the key into an environment variable and rotate it." null if nothing to do (e.g. false positives).
+
+      // --- Technical detail, shown only when the reader opens the deep dive.
+      // --- Be precise here; this is where jargon belongs.
+      "title": string,            // the technical name for the issue
       "explanation": string,      // grounded in what you actually read
       "evidence": string,         // which tool flagged it + what you verified
       "suggestedFix": string | null,

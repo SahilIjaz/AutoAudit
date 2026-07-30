@@ -32,17 +32,17 @@ function Column({
         {findings.map((f, i) => (
           <div key={f.findingId + i} className="aa-card p-3.5">
             <div className="flex flex-wrap items-center gap-2">
-              <SeverityBadge severity={f.severity} />
-              <VerdictChip verdict={f.verdict} />
+              <SeverityBadge severity={f.severity} plain />
+              <VerdictChip verdict={f.verdict} plain />
             </div>
-            <p className="mt-2 text-sm font-medium text-[var(--text)]">{f.title}</p>
+            <p className="mt-2 text-sm font-medium text-[var(--text)]">{f.plainTitle}</p>
             {f.file && (
               <p className="mt-1 font-mono text-xs text-[var(--text-faint)]">
                 {f.file}
                 {f.line ? `:${f.line}` : ""}
               </p>
             )}
-            <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">{f.explanation}</p>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">{f.plainImpact}</p>
           </div>
         ))}
         {findings.length === 0 && (

@@ -25,6 +25,7 @@ export function FocusFindings({
   const idxRef = useRef(0);
   const lock = useRef(false);
   const stageRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef<HTMLDivElement>(null);
 
   const move = useCallback(
     (dir: Dir) => {
@@ -56,6 +57,16 @@ export function FocusFindings({
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaY) < 8) return;
+
+      // With the depth analysis expanded a card can overflow its slot. Let it
+      // scroll to its own edge before the wheel starts advancing findings.
+      const card = activeRef.current;
+      if (card && card.scrollHeight - card.clientHeight > 2) {
+        const atTop = card.scrollTop <= 0;
+        const atBottom = card.scrollTop + card.clientHeight >= card.scrollHeight - 1;
+        if (e.deltaY > 0 ? !atBottom : !atTop) return;
+      }
+
       const dir: Dir = e.deltaY > 0 ? "next" : "prev";
       const i = idxRef.current;
       const canMove = dir === "next" ? i < total - 1 : i > 0;
@@ -81,6 +92,7 @@ export function FocusFindings({
         )}
         <div
           key={`in-${index}`}
+          ref={activeRef}
           className={`swap-card ${
             anim ? (anim.dir === "next" ? "swap-enter-next" : "swap-enter-prev") : ""
           }`}

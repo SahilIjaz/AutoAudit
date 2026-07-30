@@ -78,6 +78,17 @@ export interface VerifiedFinding {
   evidence: string;
   suggestedFix: string | null;
   contextSnippet: string | null;
+
+  /* ---- Plain-language layer: everything the UI shows by default ----
+     Short, jargon-free, one idea each. The technical fields above are only
+     revealed when the reader asks for the deeper analysis. */
+
+  /** Jargon-free headline, ≤ 72 chars. */
+  plainTitle: string;
+  /** One sentence: what could go wrong, in everyday words. */
+  plainImpact: string;
+  /** One short instruction: what to do about it. Null if there's nothing to do. */
+  plainFix: string | null;
 }
 
 export interface AuditReport {
@@ -98,6 +109,13 @@ export interface CompareResult {
   };
 }
 
+/** Outcome of the optional "email me the report" step, surfaced in the UI. */
+export interface EmailStatus {
+  to: string;
+  sent: boolean;
+  reason?: string;
+}
+
 export interface Job {
   id: string;
   repoUrl: string;
@@ -108,4 +126,7 @@ export interface Job {
   compareResult?: CompareResult;
   error?: string;
   createdAt: number;
+  /** Where to mail the finished report. Absent when the user didn't ask for it. */
+  email?: string;
+  emailStatus?: EmailStatus;
 }

@@ -7,9 +7,11 @@ import { runAllAnalyzers } from "./analyzers";
 import { runAgentLoop } from "./agent/orchestrator";
 import type { ToolContext } from "./agent/tools";
 import { generateValidatedReport } from "./output/validateWithRetry";
+import { normalizeFinding } from "./output/schema";
 import { MetricsCollector } from "./metrics/metrics";
 import { runNaiveReview } from "./compare/naive";
 import type { JobStore } from "./jobs/jobStore";
+import { sendReportEmail, sendFailureEmail } from "./notify/sendReport";
 
 let sweptOnce = false;
 
@@ -81,33 +83,73 @@ async function analyze(
   );
 
   // Overflow findings the agent never saw are reported as unverified.
-  const overflowVerified = overflow.map((f) => ({
-    findingId: f.id,
-    verdict: "unverified" as const,
-    severity: f.severity,
-    category: f.category,
-    file: f.file,
-    line: f.line,
-    title: f.message.slice(0, 80),
-    explanation: "Not investigated — exceeded the per-run triage cap.",
-    evidence: `Flagged by ${f.tool} (${f.ruleId}).`,
-    suggestedFix: null,
-    contextSnippet: null,
-  }));
+  const overflowVerified = overflow.map((f) =>
+    normalizeFinding({
+      findingId: f.id,
+      verdict: "unverified" as const,
+      severity: f.severity,
+      category: f.category,
+      file: f.file,
+      line: f.line,
+      title: f.message.slice(0, 80),
+      explanation: "Not investigated — exceeded the per-run triage cap.",
+      evidence: `Flagged by ${f.tool} (${f.ruleId}).`,
+      suggestedFix: null,
+      contextSnippet: null,
+      plainTitle: f.message,
+      plainImpact: "This one wasn't checked — too many findings in a single run.",
+      plainFix: null,
+    })
+  );
 
   return {
     summary: modelReport.summary,
-    findings: [...modelReport.findings, ...overflowVerified],
+    findings: [...modelReport.findings.map(normalizeFinding), ...overflowVerified],
     repo: repoMeta(repo, repoUrl),
     metrics: metrics.snapshot(),
     rawFindings: findings,
   };
 }
 
+/**
+ * Mails the finished report if one was requested. Runs before the job is marked
+ * "done" so the client — which stops polling at "done" — still sees the result.
+ * Failures are recorded, never rethrown: a dead mail server must not turn a
+ * completed audit into a failed job.
+ */
+async function mailReport(
+  store: JobStore,
+  jobId: string,
+  email: string | undefined,
+  report: AuditReport
+): Promise<void> {
+  if (!email) return;
+  store.appendEvent(jobId, "reporting", `emailing ${email}`);
+  const outcome = await sendReportEmail(email, report);
+  store.update(jobId, { emailStatus: { to: email, ...outcome } });
+}
+
+/**
+ * Tells the requester a run died. Recorded on the job like the success path, so
+ * a mail failure here is visible instead of vanishing.
+ */
+async function mailFailure(
+  store: JobStore,
+  jobId: string,
+  email: string | undefined,
+  repoUrl: string,
+  message: string
+): Promise<void> {
+  if (!email) return;
+  const outcome = await sendFailureEmail(email, repoUrl, message);
+  store.update(jobId, { emailStatus: { to: email, ...outcome } });
+}
+
 export async function runAnalysis(
   repoUrl: string,
   jobId: string,
-  store: JobStore
+  store: JobStore,
+  opts: { email?: string } = {}
 ): Promise<void> {
   if (!sweptOnce) {
     sweptOnce = true;
@@ -122,10 +164,14 @@ export async function runAnalysis(
     repo = await metrics.time("clone", () => acquireRepo(repoUrl));
     const report = await analyze(repo, repoUrl, metrics, store, jobId);
     store.update(jobId, { report });
+    await mailReport(store, jobId, opts.email, report);
     store.appendEvent(jobId, "done");
   } catch (err) {
-    store.update(jobId, { error: (err as Error).message });
-    store.appendEvent(jobId, "error", (err as Error).message);
+    const message = (err as Error).message;
+    store.update(jobId, { error: message });
+    // Before the "error" event, which is where the client stops polling.
+    await mailFailure(store, jobId, opts.email, repoUrl, message);
+    store.appendEvent(jobId, "error", message);
   } finally {
     if (repo) await repo.cleanup();
   }
@@ -134,7 +180,8 @@ export async function runAnalysis(
 export async function runComparison(
   repoUrl: string,
   jobId: string,
-  store: JobStore
+  store: JobStore,
+  opts: { email?: string } = {}
 ): Promise<void> {
   await checkToolchain();
   let repo: ClonedRepo | undefined;
@@ -155,10 +202,15 @@ export async function runComparison(
 
     const compareResult: CompareResult = { grounded, naive };
     store.update(jobId, { report: grounded, compareResult });
+    // The grounded report is the one worth mailing; the naive baseline is a
+    // methodology demo that only makes sense side-by-side in the UI.
+    await mailReport(store, jobId, opts.email, grounded);
     store.appendEvent(jobId, "done");
   } catch (err) {
-    store.update(jobId, { error: (err as Error).message });
-    store.appendEvent(jobId, "error", (err as Error).message);
+    const message = (err as Error).message;
+    store.update(jobId, { error: message });
+    await mailFailure(store, jobId, opts.email, repoUrl, message);
+    store.appendEvent(jobId, "error", message);
   } finally {
     if (repo) await repo.cleanup();
   }

@@ -80,6 +80,36 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
       {running && (
         <div className="aa-panel mt-8 p-6">
           <JobProgress job={job} />
+          {job.email && (
+            <p className="mt-4 border-t border-[var(--border)] pt-4 text-xs text-[var(--text-faint)]">
+              You can close this tab — the report will be emailed to{" "}
+              <span className="text-[var(--text-muted)]">{job.email}</span> when it's done.
+            </p>
+          )}
+        </div>
+      )}
+
+      {job.emailStatus && (
+        <div
+          className={`mt-6 rounded-xl border p-4 text-sm ${
+            job.emailStatus.sent
+              ? "border-[rgba(74,222,128,0.3)] bg-[var(--good-dim)] text-[var(--text)]"
+              : "border-[rgba(255,180,77,0.3)] bg-[var(--medium-dim)] text-[var(--text)]"
+          }`}
+        >
+          {job.emailStatus.sent ? (
+            <>
+              <span className="text-[var(--good)]">✓</span> Report emailed to{" "}
+              <span className="font-medium">{job.emailStatus.to}</span>.
+            </>
+          ) : (
+            <>
+              <span className="text-[var(--medium)]">!</span> Couldn&apos;t email the report to{" "}
+              <span className="font-medium">{job.emailStatus.to}</span>
+              {job.emailStatus.reason ? ` — ${job.emailStatus.reason}` : ""}. The full report is
+              below.
+            </>
+          )}
         </div>
       )}
 
@@ -94,7 +124,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
         <div className="mt-8 space-y-8 aa-fade-up">
           <div className="aa-panel p-5">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-faint)]">
-              Summary
+              In short
             </h2>
             <p className="mt-2 leading-relaxed text-[var(--text)]">{job.report.summary}</p>
           </div>

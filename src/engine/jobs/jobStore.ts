@@ -2,8 +2,14 @@ import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config";
 import type { Job, JobPhase } from "../types";
 
+export interface JobCreateInput {
+  repoUrl: string;
+  mode: Job["mode"];
+  email?: string;
+}
+
 export interface JobStore {
-  create(input: { repoUrl: string; mode: Job["mode"] }): Job;
+  create(input: JobCreateInput): Job;
   get(id: string): Job | undefined;
   update(id: string, patch: Partial<Job>): void;
   appendEvent(id: string, phase: JobPhase, note?: string): void;
@@ -12,7 +18,7 @@ export interface JobStore {
 class InMemoryJobStore implements JobStore {
   private jobs = new Map<string, Job>();
 
-  create(input: { repoUrl: string; mode: Job["mode"] }): Job {
+  create(input: JobCreateInput): Job {
     this.sweep();
     const job: Job = {
       id: randomUUID(),
@@ -21,6 +27,7 @@ class InMemoryJobStore implements JobStore {
       phase: "queued",
       events: [{ at: Date.now(), phase: "queued" }],
       createdAt: Date.now(),
+      ...(input.email ? { email: input.email } : {}),
     };
     this.jobs.set(job.id, job);
     return job;

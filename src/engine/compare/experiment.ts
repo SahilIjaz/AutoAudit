@@ -5,6 +5,7 @@ import { profileRepo } from "../profile/stackProfiler";
 import { runAllAnalyzers } from "../analyzers";
 import { runAgentLoop } from "../agent/orchestrator";
 import { generateValidatedReport } from "../output/validateWithRetry";
+import { normalizeFinding } from "../output/schema";
 import { MetricsCollector } from "../metrics/metrics";
 import { runNaiveReview } from "./naive";
 import { CONFIG } from "../config";
@@ -45,7 +46,7 @@ export async function runExperiment(repoUrl: string): Promise<CompareResult> {
     );
     const grounded: AuditReport = {
       summary: modelReport.summary,
-      findings: modelReport.findings,
+      findings: modelReport.findings.map(normalizeFinding),
       repo: {
         owner: repo.owner,
         repo: repo.repo,
