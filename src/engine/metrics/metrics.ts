@@ -64,3 +64,40 @@ export class MetricsCollector {
     };
   }
 }
+
+export const EMPTY_METRICS: AnalysisMetrics = {
+  model: CONFIG.model,
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  estimatedCostUsd: 0,
+  apiCalls: 0,
+  toolCalls: {},
+  wallTimeMs: {},
+};
+
+/**
+ * Adds up metrics from separate requests. A serverless run is split across a
+ * scan call, several verify calls and a finalize call, each with its own
+ * collector, so the totals shown to the user are accumulated client-side.
+ */
+export function mergeMetrics(parts: AnalysisMetrics[]): AnalysisMetrics {
+  const total: AnalysisMetrics = { ...EMPTY_METRICS, toolCalls: {}, wallTimeMs: {} };
+  for (const p of parts) {
+    total.inputTokens += p.inputTokens;
+    total.outputTokens += p.outputTokens;
+    total.cacheReadTokens += p.cacheReadTokens;
+    total.cacheWriteTokens += p.cacheWriteTokens;
+    total.estimatedCostUsd += p.estimatedCostUsd;
+    total.apiCalls += p.apiCalls;
+    for (const [k, v] of Object.entries(p.toolCalls)) {
+      total.toolCalls[k] = (total.toolCalls[k] ?? 0) + v;
+    }
+    for (const [k, v] of Object.entries(p.wallTimeMs)) {
+      total.wallTimeMs[k] = (total.wallTimeMs[k] ?? 0) + v;
+    }
+  }
+  total.estimatedCostUsd = Number(total.estimatedCostUsd.toFixed(6));
+  return total;
+}

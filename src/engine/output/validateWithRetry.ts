@@ -3,7 +3,12 @@ import type { MessageParam, TextBlock } from "@anthropic-ai/sdk/resources/messag
 import { z } from "zod";
 import { CONFIG } from "../config";
 import type { MetricsCollector } from "../metrics/metrics";
-import { AuditReportSchema, type AuditReportModelOutput } from "./schema";
+import {
+  AuditReportSchema,
+  FindingsBatchSchema,
+  type AuditReportModelOutput,
+  type FindingsBatchModelOutput,
+} from "./schema";
 
 export class ReportValidationError extends Error {
   constructor(
@@ -131,6 +136,94 @@ export async function generateValidatedReport(
 
   throw new ReportValidationError(
     "Model failed to produce a valid report after retries",
+    lastIssues
+  );
+}
+
+const BATCH_INSTRUCTION = `Now produce your verdicts for the findings in this batch as a single JSON object and nothing else. It must match this shape exactly:
+{
+  "findings": [
+    {
+      "findingId": string,        // MUST be one of the finding ids you were given
+      "verdict": "confirmed" | "false_positive" | "needs_review" | "unverified",
+      "severity": "high" | "medium" | "low",
+      "category": "security" | "dependency" | "code-quality",
+      "file": string | null,
+      "line": number | null,
+
+      // --- The plain-language layer. This is ALL most readers will see, so it
+      // --- must stand alone and be understandable by someone who does not
+      // --- code. No jargon, no rule ids, no tool names, no file paths here.
+      "plainTitle": string,       // ≤ 10 words, ≤ 72 chars. The problem in everyday words, e.g. "A password is written directly into the code".
+      "plainImpact": string,      // EXACTLY ONE sentence, ≤ 25 words. What could actually go wrong, concretely. No hedging, no restating the title.
+      "plainFix": string | null,  // EXACTLY ONE short instruction, ≤ 20 words. null if nothing to do (e.g. false positives).
+
+      // --- Technical detail, shown only when the reader opens the deep dive.
+      "title": string,            // the technical name for the issue
+      "explanation": string,      // grounded in what you actually read
+      "evidence": string,         // which tool flagged it + what you verified
+      "suggestedFix": string | null,
+      "contextSnippet": string | null  // the relevant code you read, if any
+    }
+  ]
+}
+Include one entry per finding id in this batch. Do not invent findingIds and do not include ids from other batches. Respond with ONLY the JSON.`;
+
+/**
+ * Same contract as generateValidatedReport, minus the summary: serverless
+ * verification runs a batch at a time, and the summary is written once at the
+ * end over all batches rather than per batch.
+ */
+export async function generateValidatedBatch(
+  client: Anthropic,
+  transcript: MessageParam[],
+  knownFindingIds: Set<string>,
+  metrics: MetricsCollector
+): Promise<FindingsBatchModelOutput> {
+  const messages: MessageParam[] = [
+    ...transcript,
+    { role: "user", content: BATCH_INSTRUCTION },
+  ];
+  let lastIssues: unknown = null;
+
+  for (let attempt = 0; attempt < CONFIG.maxOutputValidationRetries; attempt++) {
+    const res = await client.messages.create({
+      model: CONFIG.model,
+      max_tokens: 8192,
+      messages,
+    });
+    metrics.recordUsage(res.usage);
+    messages.push({ role: "assistant", content: res.content });
+
+    try {
+      const result = FindingsBatchSchema.safeParse(extractJson(extractText(res.content)));
+      if (!result.success) {
+        lastIssues = result.error.issues;
+        throw new z.ZodError(result.error.issues);
+      }
+
+      const unknown = result.data.findings
+        .map((f) => f.findingId)
+        .filter((id) => !knownFindingIds.has(id));
+      if (unknown.length > 0) {
+        lastIssues = unknown;
+        throw new Error(
+          `Unknown findingIds not in the provided list: ${unknown.join(", ")}. Use the exact ids given.`
+        );
+      }
+
+      return result.data;
+    } catch (err) {
+      const detail = err instanceof z.ZodError ? JSON.stringify(err.issues) : String(err);
+      messages.push({
+        role: "user",
+        content: `Your previous output was invalid: ${detail}\n\n${BATCH_INSTRUCTION}`,
+      });
+    }
+  }
+
+  throw new ReportValidationError(
+    "Model failed to produce valid verdicts after retries",
     lastIssues
   );
 }

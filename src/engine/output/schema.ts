@@ -33,8 +33,18 @@ export const AuditReportSchema = z.object({
   findings: z.array(VerifiedFindingSchema),
 });
 
+/** Serverless verification runs in batches, which produce findings but no summary. */
+export const FindingsBatchSchema = z.object({
+  findings: z.array(VerifiedFindingSchema),
+});
+
+export const SummarySchema = z.object({
+  summary: z.string().max(320, "summary must be concise (≤ 320 characters, ~40 words)"),
+});
+
 export type AuditReportModelOutput = z.infer<typeof AuditReportSchema>;
 export type VerifiedFindingModelOutput = z.infer<typeof VerifiedFindingSchema>;
+export type FindingsBatchModelOutput = z.infer<typeof FindingsBatchSchema>;
 
 /** Collapse whitespace and cut at a word boundary, with an ellipsis. */
 function clamp(text: string, max: number): string {
