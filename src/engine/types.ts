@@ -4,7 +4,7 @@ export type Category = "security" | "dependency" | "code-quality";
 export interface Finding {
   /** Stable id: `${tool}:${ruleId}:${file}:${line}` */
   id: string;
-  tool: "semgrep" | "npm-audit" | "eslint";
+  tool: "semgrep" | "npm-audit" | "eslint" | "secret-scan";
   ruleId: string;
   severity: Severity;
   category: Category;

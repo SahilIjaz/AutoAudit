@@ -1,9 +1,8 @@
-import { execa } from "execa";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import type { Tool } from "@anthropic-ai/sdk/resources/messages";
-import { CONFIG, checkToolchain } from "../config";
+import { CONFIG } from "../config";
 import type { RepoProfile } from "../types";
 import type { MetricsCollector } from "../metrics/metrics";
 import { resolveWithin, PathTraversalError } from "./safePath";
@@ -127,27 +126,54 @@ async function getContextTool(ctx: ToolContext, input: z.infer<typeof getContext
   return wrapFile(input.path, numberLines(slice, start));
 }
 
+const SEARCH_SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", "out", "coverage"]);
+
+/**
+ * Literal search implemented in JS rather than by shelling out to rg/grep.
+ * Serverless has neither binary, and this is the agent's most-used tool after
+ * reading files, so it cannot depend on the environment having one.
+ */
 async function searchTool(ctx: ToolContext, input: z.infer<typeof searchSchema>): Promise<string> {
   const max = input.maxResults ?? 50;
-  const toolchain = await checkToolchain();
-  let stdout = "";
-  if (toolchain.hasRipgrep) {
-    const res = await execa(
-      "rg",
-      ["--fixed-strings", "--line-number", "--no-heading", "--max-count", String(max), "--", input.pattern, "."],
-      { cwd: ctx.repoDir, timeout: 30_000, reject: false }
-    );
-    stdout = res.stdout;
-  } else {
-    const res = await execa(
-      "grep",
-      ["-rnF", "--exclude-dir=node_modules", "--exclude-dir=.git", "--", input.pattern, "."],
-      { cwd: ctx.repoDir, timeout: 30_000, reject: false }
-    );
-    stdout = res.stdout.split("\n").slice(0, max).join("\n");
+  const needle = input.pattern;
+  const hits: string[] = [];
+
+  async function visit(dir: string): Promise<void> {
+    if (hits.length >= max) return;
+    const entries = await fsp.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (hits.length >= max) return;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!SEARCH_SKIP_DIRS.has(entry.name)) await visit(full);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+
+      const stat = await fsp.stat(full);
+      if (stat.size > CONFIG.largeFileBytes) continue;
+
+      let content: string;
+      try {
+        content = await fsp.readFile(full, "utf8");
+      } catch {
+        continue;
+      }
+      if (!content.includes(needle)) continue;
+
+      const rel = path.relative(ctx.repoDir, full).split(path.sep).join("/");
+      const lines = content.split("\n");
+      for (let i = 0; i < lines.length && hits.length < max; i++) {
+        if (lines[i].includes(needle)) {
+          hits.push(`${rel}:${i + 1}:${lines[i].slice(0, 300).trim()}`);
+        }
+      }
+    }
   }
-  if (!stdout.trim()) return `No matches for ${JSON.stringify(input.pattern)}.`;
-  return truncate(stdout);
+
+  await visit(ctx.repoDir);
+  if (hits.length === 0) return `No matches for ${JSON.stringify(needle)}.`;
+  return truncate(hits.join("\n"));
 }
 
 async function listTool(ctx: ToolContext, input: z.infer<typeof listSchema>): Promise<string> {
