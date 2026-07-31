@@ -11,11 +11,20 @@ export const CONFIG = {
   },
   cloneTimeoutMs: 60_000,
   subprocessTimeoutMs: 120_000,
-  maxRepoBytes: 200 * 1024 * 1024,
+  /** Serverless /tmp is 512 MB and shared with the extracted tarball. */
+  maxRepoBytes: 60 * 1024 * 1024,
   maxFilesForAgent: 5_000,
   maxAgentIterations: 25,
   /** Cap on findings handed to the agent; overflow reported as "unverified". */
   maxFindingsToAgent: 40,
+  /**
+   * Serverless verification is batched: each request verifies a few findings so
+   * it finishes well inside a function's time limit, and the browser drives the
+   * loop. Smaller batches = more requests but no timeout risk.
+   */
+  verifyBatchSize: 4,
+  /** Tool-calling turns allowed per batch (the full cap applies to a whole run). */
+  maxIterationsPerBatch: 8,
   maxToolResultChars: 20_000,
   maxFileReadLines: 400,
   maxOutputValidationRetries: 3,
