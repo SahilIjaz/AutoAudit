@@ -73,20 +73,38 @@ export function isEmailEnabled(): boolean {
   return mailConfig() !== null;
 }
 
-export interface Toolchain {
-  git: string;
-  semgrep: string;
-  hasRipgrep: boolean;
+/**
+ * What this environment can actually do. AutoAudit runs in two places with very
+ * different capabilities:
+ *
+ *  - Local / CLI: git and Semgrep on PATH, so the full analyzer set runs.
+ *  - Vercel (serverless): no binaries at all. Repos arrive as GitHub tarballs
+ *    and only the pure-JS analyzers run.
+ *
+ * Nothing here throws. A missing binary downgrades the analyzer set rather than
+ * failing the run, because on Vercel every binary is missing by definition.
+ */
+export interface Capabilities {
+  git: string | null;
+  semgrep: string | null;
+  /** True when nothing can be shelled out to — i.e. a serverless function. */
+  jsOnly: boolean;
 }
 
-let cachedToolchain: Toolchain | null = null;
+let cached: Capabilities | null = null;
 
-/**
- * Verifies the required external tools exist. Throws with install
- * instructions if something is missing. Result is cached per process.
- */
-export async function checkToolchain(): Promise<Toolchain> {
-  if (cachedToolchain) return cachedToolchain;
+/** Set VERCEL/AUTOAUDIT_JS_ONLY to skip probing entirely — no binaries exist there. */
+function forcedJsOnly(): boolean {
+  return Boolean(process.env.VERCEL) || process.env.AUTOAUDIT_JS_ONLY === "1";
+}
+
+export async function detectCapabilities(): Promise<Capabilities> {
+  if (cached) return cached;
+
+  if (forcedJsOnly()) {
+    cached = { git: null, semgrep: null, jsOnly: true };
+    return cached;
+  }
 
   const version = async (cmd: string, args: string[]): Promise<string | null> => {
     try {
@@ -98,20 +116,16 @@ export async function checkToolchain(): Promise<Toolchain> {
     }
   };
 
-  const git = await version("git", ["--version"]);
-  if (!git) {
-    throw new Error("git is required but was not found on PATH. Install git >= 2.x.");
-  }
+  const [git, semgrep] = await Promise.all([
+    version("git", ["--version"]),
+    version("semgrep", ["--version"]),
+  ]);
 
-  const semgrep = await version("semgrep", ["--version"]);
-  if (!semgrep) {
-    throw new Error(
-      "semgrep is required but was not found on PATH. Install it with `brew install semgrep` (macOS) or `pipx install semgrep`."
-    );
-  }
+  cached = { git, semgrep, jsOnly: git === null && semgrep === null };
+  return cached;
+}
 
-  const rg = await version("rg", ["--version"]);
-
-  cachedToolchain = { git, semgrep, hasRipgrep: rg !== null };
-  return cachedToolchain;
+/** Test seam. */
+export function resetCapabilities(): void {
+  cached = null;
 }
