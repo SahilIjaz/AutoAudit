@@ -135,32 +135,38 @@ export async function fetchRepoTarball(url: string, targetDir?: string): Promise
       throw new RepoNotFoundError(`Could not download ${owner}/${repo} (HTTP ${res.status})`);
     }
 
+    let overLimit = false;
+
     await new Promise<void>((resolve, reject) => {
       const extract = tar.x({
         cwd: dir,
         // GitHub wraps everything in a `${repo}-${ref}/` directory.
         strip: 1,
-        // Never honour ownership, permissions or links from an untrusted archive.
+        // Never honour absolute paths, ownership or links from an untrusted archive.
         preservePaths: false,
         noMtime: true,
-        filter: (entryPath, entry) => {
+        filter: (entryPath, stat) => {
           const rel = entryPath.split("/").slice(1).join("/");
           if (!rel || !shouldExtract(rel)) return false;
-          if (entry.type !== "File" && entry.type !== "Directory") return false;
-          if (entry.type === "File") {
-            if (entry.size > CONFIG.largeFileBytes) return false;
-            bytes += entry.size;
-            fileCount++;
-            if (bytes > CONFIG.maxRepoBytes || fileCount > CONFIG.maxFilesForAgent) {
-              extract.destroy(
-                new RepoTooLargeError(
-                  `Repository exceeds the ${Math.round(
-                    CONFIG.maxRepoBytes / 1024 / 1024
-                  )} MB / ${CONFIG.maxFilesForAgent} file limit for a hosted run`
-                )
-              );
-              return false;
-            }
+
+          // The second arg is a tar ReadEntry when unpacking; only files and
+          // directories are extracted (no symlinks, devices or hardlinks).
+          const entry = stat as { type?: string; size?: number };
+          if (entry.type === "Directory") return true;
+          if (entry.type !== "File") return false;
+
+          const size = entry.size ?? 0;
+          if (size > CONFIG.largeFileBytes) return false;
+
+          // Enforced during extraction, not after: on a 512 MB /tmp we cannot
+          // write a huge repo first and measure it later. Once over the cap we
+          // stop writing and fail after the stream drains.
+          if (overLimit) return false;
+          bytes += size;
+          fileCount++;
+          if (bytes > CONFIG.maxRepoBytes || fileCount > CONFIG.maxFilesForAgent) {
+            overLimit = true;
+            return false;
           }
           return true;
         },
@@ -169,6 +175,14 @@ export async function fetchRepoTarball(url: string, targetDir?: string): Promise
       extract.on("finish", resolve);
       Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]).pipe(extract);
     });
+
+    if (overLimit) {
+      throw new RepoTooLargeError(
+        `Repository exceeds this deployment's limit of ${Math.round(
+          CONFIG.maxRepoBytes / 1024 / 1024
+        )} MB / ${CONFIG.maxFilesForAgent} files. Try a smaller repository, or run AutoAudit locally.`
+      );
+    }
 
     return {
       dir: fs.realpathSync(dir),

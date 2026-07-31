@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizeSemgrep } from "./semgrep";
-import { normalizeNpmAudit } from "./npmAudit";
+import { normalizeAdvisories, collectInstalled } from "./npmAdvisories";
 import { normalizeEslint } from "./eslint";
 
 describe("normalizeSemgrep", () => {
@@ -33,23 +33,65 @@ describe("normalizeSemgrep", () => {
   });
 });
 
-describe("normalizeNpmAudit", () => {
-  it("maps npm severities to our scale, category dependency", () => {
-    const out = normalizeNpmAudit({
-      vulnerabilities: {
-        lodash: {
-          name: "lodash",
-          severity: "critical",
-          range: "<4.17.21",
-          via: [{ title: "Prototype Pollution" }],
-        },
-        cookie: { name: "cookie", severity: "low", via: [] },
+describe("collectInstalled", () => {
+  it("reads exact versions from a v2/v3 lockfile, ignoring the root entry", () => {
+    const out = collectInstalled({
+      lockfileVersion: 3,
+      packages: {
+        "": { version: "1.0.0" },
+        "node_modules/lodash": { version: "4.17.11" },
+        "node_modules/express": { version: "4.16.0" },
+        // Nested duplicate of a different version — both are installed.
+        "node_modules/express/node_modules/lodash": { version: "3.10.1" },
       },
     });
+    expect(out.lodash).toEqual(["3.10.1", "4.17.11"]);
+    expect(out.express).toEqual(["4.16.0"]);
+    // The root project isn't a dependency and has no advisories to look up.
+    expect(Object.keys(out)).toEqual(["express", "lodash"]);
+  });
+
+  it("reads a v1 lockfile's nested tree", () => {
+    const out = collectInstalled({
+      lockfileVersion: 1,
+      dependencies: {
+        express: { version: "4.16.0", dependencies: { lodash: { version: "3.10.1" } } },
+      },
+    });
+    expect(out).toEqual({ express: ["4.16.0"], lodash: ["3.10.1"] });
+  });
+
+  it("skips non-exact versions the advisory endpoint can't use", () => {
+    const out = collectInstalled({
+      packages: {
+        "node_modules/a": { version: "^1.0.0" },
+        "node_modules/b": { version: "file:../local" },
+        "node_modules/c": { version: "2.3.4" },
+      },
+    });
+    expect(Object.keys(out)).toEqual(["c"]);
+  });
+});
+
+describe("normalizeAdvisories", () => {
+  it("maps npm severities to our scale, one finding per package at worst severity", () => {
+    const out = normalizeAdvisories({
+      lodash: [
+        { title: "Prototype Pollution", severity: "critical", vulnerable_versions: "<4.17.21" },
+        { title: "Command Injection", severity: "moderate", vulnerable_versions: "<4.17.19" },
+      ],
+      cookie: [{ title: "Bad cookie", severity: "low" }],
+      clean: [],
+    });
+
+    expect(out).toHaveLength(2); // "clean" has no advisories
     const lodash = out.find((f) => f.ruleId === "lodash")!;
-    expect(lodash.severity).toBe("high");
+    expect(lodash.severity).toBe("high"); // critical wins over moderate
     expect(lodash.category).toBe("dependency");
     expect(lodash.file).toBe("package.json");
+    expect(lodash.message).toContain("Prototype Pollution");
+    expect(lodash.message).toContain("Command Injection");
+    expect(lodash.id).toBe("npm-audit:lodash:package.json:-");
     expect(out.find((f) => f.ruleId === "cookie")!.severity).toBe("low");
   });
 });

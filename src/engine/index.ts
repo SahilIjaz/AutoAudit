@@ -1,7 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { CONFIG, checkToolchain } from "./config";
-import type { AuditReport, CompareResult, Finding, RepoMeta, RepoProfile } from "./types";
-import { cloneRepo, useLocalRepo, sweepStaleTempDirs, type ClonedRepo } from "./git/cloneRepo";
+import { CONFIG, detectCapabilities } from "./config";
+import type { AuditReport, Finding, RepoMeta } from "./types";
+import {
+  cloneRepo,
+  useLocalRepo,
+  sweepStaleTempDirs,
+  type ClonedRepo,
+} from "./git/cloneRepo";
+import { fetchRepoTarball } from "./git/fetchRepo";
 import { profileRepo } from "./profile/stackProfiler";
 import { runAllAnalyzers } from "./analyzers";
 import { runAgentLoop } from "./agent/orchestrator";
@@ -9,9 +15,16 @@ import type { ToolContext } from "./agent/tools";
 import { generateValidatedReport } from "./output/validateWithRetry";
 import { normalizeFinding } from "./output/schema";
 import { MetricsCollector } from "./metrics/metrics";
-import { runNaiveReview } from "./compare/naive";
-import type { JobStore } from "./jobs/jobStore";
-import { sendReportEmail, sendFailureEmail } from "./notify/sendReport";
+
+/**
+ * Single-process pipeline, used by the CLI harness (`npm run analyze`).
+ *
+ * The hosted app does NOT use this path — a serverless function cannot hold a
+ * multi-minute job, so the web flow is split into short steps in
+ * ./serverless/steps.ts and driven from the browser. This entry point stays
+ * because locally there is no such limit, and with git + Semgrep on PATH it
+ * produces a richer scan than the hosted deployment can.
+ */
 
 let sweptOnce = false;
 
@@ -32,207 +45,78 @@ function repoMeta(repo: ClonedRepo, url: string): RepoMeta {
   };
 }
 
+/**
+ * A local path or file:// URL analyzes a directory in place. Remote repos use
+ * `git clone` when git is available and fall back to the tarball fetch when it
+ * is not, so the CLI still works on a machine without git.
+ */
 async function acquireRepo(repoUrl: string): Promise<ClonedRepo> {
-  // A file:// URL or bare local path runs against a local directory (fixtures).
   if (repoUrl.startsWith("file://")) return useLocalRepo(repoUrl.slice("file://".length));
   if (!repoUrl.startsWith("http")) return useLocalRepo(repoUrl);
-  return cloneRepo(repoUrl);
+  const caps = await detectCapabilities();
+  return caps.git ? cloneRepo(repoUrl) : fetchRepoTarball(repoUrl);
 }
 
-export interface GroundedRunResult {
-  report: AuditReport;
-}
-
-/** Shared clone → profile → scan → agent → report pipeline. */
-async function analyze(
-  repo: ClonedRepo,
+/** Direct pipeline entry for the CLI harness. */
+export async function analyzeToReport(
   repoUrl: string,
-  metrics: MetricsCollector,
-  store: JobStore | undefined,
-  jobId: string | undefined,
-  precomputed?: { profile: RepoProfile; findings: Finding[] }
-): Promise<AuditReport> {
-  const setPhase = (phase: Parameters<JobStore["appendEvent"]>[1], note?: string) => {
-    if (store && jobId) store.appendEvent(jobId, phase, note);
-  };
-
-  setPhase("profiling");
-  const profile =
-    precomputed?.profile ??
-    (await metrics.time("profile", () => profileRepo(repo.dir, repo)));
-
-  setPhase("scanning");
-  const findings: Finding[] =
-    precomputed?.findings ??
-    (await metrics.time("scan", () => runAllAnalyzers(repo.dir, profile)));
-
-  const client = anthropic();
-  const capped = findings.slice(0, CONFIG.maxFindingsToAgent);
-  const overflow = findings.slice(CONFIG.maxFindingsToAgent);
-
-  setPhase("agent", `${capped.length} findings to verify`);
-  const ctx: ToolContext = { repoDir: repo.dir, profile, metrics };
-  const agentResult = await metrics.time("agent", () =>
-    runAgentLoop(client, capped, ctx)
-  );
-
-  setPhase("reporting");
-  const knownIds = new Set(capped.map((f) => f.id));
-  const modelReport = await metrics.time("report", () =>
-    generateValidatedReport(client, agentResult.transcript, knownIds, metrics)
-  );
-
-  // Overflow findings the agent never saw are reported as unverified.
-  const overflowVerified = overflow.map((f) =>
-    normalizeFinding({
-      findingId: f.id,
-      verdict: "unverified" as const,
-      severity: f.severity,
-      category: f.category,
-      file: f.file,
-      line: f.line,
-      title: f.message.slice(0, 80),
-      explanation: "Not investigated — exceeded the per-run triage cap.",
-      evidence: `Flagged by ${f.tool} (${f.ruleId}).`,
-      suggestedFix: null,
-      contextSnippet: null,
-      plainTitle: f.message,
-      plainImpact: "This one wasn't checked — too many findings in a single run.",
-      plainFix: null,
-    })
-  );
-
-  return {
-    summary: modelReport.summary,
-    findings: [...modelReport.findings.map(normalizeFinding), ...overflowVerified],
-    repo: repoMeta(repo, repoUrl),
-    metrics: metrics.snapshot(),
-    rawFindings: findings,
-  };
-}
-
-/**
- * Mails the finished report if one was requested. Runs before the job is marked
- * "done" so the client — which stops polling at "done" — still sees the result.
- * Failures are recorded, never rethrown: a dead mail server must not turn a
- * completed audit into a failed job.
- */
-async function mailReport(
-  store: JobStore,
-  jobId: string,
-  email: string | undefined,
-  report: AuditReport
-): Promise<void> {
-  if (!email) return;
-  store.appendEvent(jobId, "reporting", `emailing ${email}`);
-  const outcome = await sendReportEmail(email, report);
-  store.update(jobId, { emailStatus: { to: email, ...outcome } });
-}
-
-/**
- * Tells the requester a run died. Recorded on the job like the success path, so
- * a mail failure here is visible instead of vanishing.
- */
-async function mailFailure(
-  store: JobStore,
-  jobId: string,
-  email: string | undefined,
-  repoUrl: string,
-  message: string
-): Promise<void> {
-  if (!email) return;
-  const outcome = await sendFailureEmail(email, repoUrl, message);
-  store.update(jobId, { emailStatus: { to: email, ...outcome } });
-}
-
-export async function runAnalysis(
-  repoUrl: string,
-  jobId: string,
-  store: JobStore,
-  opts: { email?: string } = {}
-): Promise<void> {
+  opts: { agent: boolean }
+): Promise<{
+  report?: AuditReport;
+  findings: Finding[];
+  profile: Awaited<ReturnType<typeof profileRepo>>;
+}> {
   if (!sweptOnce) {
     sweptOnce = true;
     void sweepStaleTempDirs();
   }
-  await checkToolchain();
 
-  const metrics = new MetricsCollector();
-  let repo: ClonedRepo | undefined;
-  try {
-    store.appendEvent(jobId, "cloning");
-    repo = await metrics.time("clone", () => acquireRepo(repoUrl));
-    const report = await analyze(repo, repoUrl, metrics, store, jobId);
-    store.update(jobId, { report });
-    await mailReport(store, jobId, opts.email, report);
-    store.appendEvent(jobId, "done");
-  } catch (err) {
-    const message = (err as Error).message;
-    store.update(jobId, { error: message });
-    // Before the "error" event, which is where the client stops polling.
-    await mailFailure(store, jobId, opts.email, repoUrl, message);
-    store.appendEvent(jobId, "error", message);
-  } finally {
-    if (repo) await repo.cleanup();
-  }
-}
-
-export async function runComparison(
-  repoUrl: string,
-  jobId: string,
-  store: JobStore,
-  opts: { email?: string } = {}
-): Promise<void> {
-  await checkToolchain();
-  let repo: ClonedRepo | undefined;
-  try {
-    store.appendEvent(jobId, "cloning");
-    repo = await acquireRepo(repoUrl);
-
-    const groundedMetrics = new MetricsCollector();
-    const grounded = await analyze(repo, repoUrl, groundedMetrics, store, jobId);
-
-    store.appendEvent(jobId, "agent", "naive baseline");
-    const naiveMetrics = new MetricsCollector();
-    const client = anthropic();
-    const profile = await profileRepo(repo.dir, repo);
-    const naive = await naiveMetrics.time("naive", () =>
-      runNaiveReview(client, repo!.dir, profile, naiveMetrics)
-    );
-
-    const compareResult: CompareResult = { grounded, naive };
-    store.update(jobId, { report: grounded, compareResult });
-    // The grounded report is the one worth mailing; the naive baseline is a
-    // methodology demo that only makes sense side-by-side in the UI.
-    await mailReport(store, jobId, opts.email, grounded);
-    store.appendEvent(jobId, "done");
-  } catch (err) {
-    const message = (err as Error).message;
-    store.update(jobId, { error: message });
-    await mailFailure(store, jobId, opts.email, repoUrl, message);
-    store.appendEvent(jobId, "error", message);
-  } finally {
-    if (repo) await repo.cleanup();
-  }
-}
-
-/** Direct pipeline entry for the CLI harness — no job store. */
-export async function analyzeToReport(
-  repoUrl: string,
-  opts: { agent: boolean }
-): Promise<{ report?: AuditReport; findings: Finding[]; profile: Awaited<ReturnType<typeof profileRepo>> }> {
-  await checkToolchain();
   const metrics = new MetricsCollector();
   const repo = await acquireRepo(repoUrl);
   try {
-    const profile = await profileRepo(repo.dir, repo);
-    const findings = await runAllAnalyzers(repo.dir, profile);
+    const profile = await metrics.time("profile", () => profileRepo(repo.dir, repo));
+    const findings = await metrics.time("scan", () => runAllAnalyzers(repo.dir, profile));
     if (!opts.agent) return { findings, profile };
-    // Agent path: reuse the already-computed profile/findings.
-    const report = await analyze(repo, repoUrl, metrics, undefined, undefined, {
-      profile,
-      findings,
-    });
+
+    const client = anthropic();
+    const capped = findings.slice(0, CONFIG.maxFindingsToAgent);
+    const overflow = findings.slice(CONFIG.maxFindingsToAgent);
+
+    const ctx: ToolContext = { repoDir: repo.dir, profile, metrics };
+    const agentResult = await metrics.time("agent", () => runAgentLoop(client, capped, ctx));
+
+    const knownIds = new Set(capped.map((f) => f.id));
+    const modelReport = await metrics.time("report", () =>
+      generateValidatedReport(client, agentResult.transcript, knownIds, metrics)
+    );
+
+    // Overflow findings the agent never saw are reported as unverified.
+    const overflowVerified = overflow.map((f) =>
+      normalizeFinding({
+        findingId: f.id,
+        verdict: "unverified" as const,
+        severity: f.severity,
+        category: f.category,
+        file: f.file,
+        line: f.line,
+        title: f.message.slice(0, 80),
+        explanation: "Not investigated — exceeded the per-run triage cap.",
+        evidence: `Flagged by ${f.tool} (${f.ruleId}).`,
+        suggestedFix: null,
+        contextSnippet: null,
+        plainTitle: f.message,
+        plainImpact: "This one wasn't checked — too many findings in a single run.",
+        plainFix: null,
+      })
+    );
+
+    const report: AuditReport = {
+      summary: modelReport.summary,
+      findings: [...modelReport.findings.map(normalizeFinding), ...overflowVerified],
+      repo: repoMeta(repo, repoUrl),
+      metrics: metrics.snapshot(),
+      rawFindings: findings,
+    };
     return { report, findings, profile };
   } finally {
     await repo.cleanup();
