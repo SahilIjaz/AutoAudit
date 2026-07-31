@@ -32,16 +32,6 @@ export interface RepoProfile {
   frameworks: string[];
 }
 
-export type JobPhase =
-  | "queued"
-  | "cloning"
-  | "profiling"
-  | "scanning"
-  | "agent"
-  | "reporting"
-  | "done"
-  | "error";
-
 export interface AnalysisMetrics {
   model: string;
   inputTokens: number;
@@ -116,17 +106,3 @@ export interface EmailStatus {
   reason?: string;
 }
 
-export interface Job {
-  id: string;
-  repoUrl: string;
-  mode: "grounded" | "compare";
-  phase: JobPhase;
-  events: { at: number; phase: JobPhase; note?: string }[];
-  report?: AuditReport;
-  compareResult?: CompareResult;
-  error?: string;
-  createdAt: number;
-  /** Where to mail the finished report. Absent when the user didn't ask for it. */
-  email?: string;
-  emailStatus?: EmailStatus;
-}

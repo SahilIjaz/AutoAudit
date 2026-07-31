@@ -1,12 +1,16 @@
-import { RepoForm } from "@/components/RepoForm";
+import { AuditRunner } from "@/components/AuditRunner";
+import { isEmailEnabled } from "@/engine/config";
 
 const STEPS = [
-  { n: "01", title: "Scan", body: "Semgrep, npm audit & ESLint find real issues across any language." },
+  { n: "01", title: "Scan", body: "Real analyzers — npm advisories, ESLint security rules, a secret scanner — find issues." },
   { n: "02", title: "Verify", body: "A Claude agent reads the actual code to confirm or dismiss each one." },
-  { n: "03", title: "Report", body: "Every finding is triaged with evidence, severity, and a fix." },
+  { n: "03", title: "Report", body: "Plain English first, with the technical evidence one click away." },
 ];
 
 export default function Home() {
+  // Read on the server so the form only offers email when it can actually send.
+  const emailEnabled = isEmailEnabled();
+
   return (
     <main className="mx-auto max-w-3xl px-6 pb-24 pt-16 sm:pt-24">
       <div className="aa-fade-up">
@@ -30,12 +34,8 @@ export default function Home() {
 
       <div className="aa-fade-up relative mt-10" style={{ animationDelay: "0.08s" }}>
         <div className="pointer-events-none absolute -inset-4 rounded-3xl bg-[radial-gradient(40rem_20rem_at_30%_0%,var(--accent-glow),transparent_70%)] opacity-60 blur-2xl" />
-        <div className="aa-panel relative p-6 sm:p-7">
-          <RepoForm />
-          <p className="mt-4 text-xs text-[var(--text-faint)]">
-            Paste any public GitHub repository — any language. It clones, scans,
-            and an agent triages every finding.
-          </p>
+        <div className="relative">
+          <AuditRunner emailEnabled={emailEnabled} />
         </div>
       </div>
 

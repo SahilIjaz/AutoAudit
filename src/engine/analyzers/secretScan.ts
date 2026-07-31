@@ -89,7 +89,9 @@ const RULES: Rule[] = [
     id: "hardcoded-secret-assignment",
     label: "Hardcoded value assigned to a secret-shaped name",
     // KEY/SECRET/TOKEN/PASSWORD/... = "<10+ chars>"
-    re: /\b[A-Za-z_][A-Za-z0-9_]*(?:SECRET|PASSWORD|PASSWD|API_?KEY|APIKEY|ACCESS_?TOKEN|AUTH_?TOKEN|PRIVATE_?KEY|CLIENT_?SECRET)[A-Za-z0-9_]*\s*[:=]\s*["'`]([^"'`\n]{10,})["'`]/gi,
+    // The leading name part must be optional: a bare `SECRET_TOKEN = "..."`
+    // starts with the keyword itself and would otherwise never match.
+    re: /\b[A-Za-z0-9_]*(?:SECRET|PASSWORD|PASSWD|API_?KEY|APIKEY|ACCESS_?TOKEN|AUTH_?TOKEN|PRIVATE_?KEY|CLIENT_?SECRET)[A-Za-z0-9_]*\s*[:=]\s*["'`]([^"'`\n]{10,})["'`]/gi,
     severity: "high",
   },
 ];
